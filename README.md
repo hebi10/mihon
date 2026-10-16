@@ -46,6 +46,14 @@ GitHub Actions의 `Local Reader CI` 워크플로에서 APK를 artifact로 제공
 
 미리보기 APK는 debug 서명을 사용하므로 정식 배포 전에 고정된 서명키로 Release APK를 빌드해야 합니다.
 
+### GitHub Releases에 테스트 APK 등록
+1. Fork 저장소의 **Actions** 페이지에서 워크플로 실행을 활성화합니다. (이미 켜져 있다면 생략)
+2. **Local Reader CI**를 선택하고 **Run workflow**를 누릅니다.
+3. 브랜치를 **main**으로 지정하여 실행합니다.
+4. 빌드 및 권한 검사가 성공하면 `v0.2.0-preview` GitHub Releases에 `hebi-comic-reader-v0.2.0-preview.apk`가 생성됩니다.
+
+Release가 비어 있다면 성공한 빌드 기록을 먼저 확인해 주세요. 워크플로가 비활성화되어 있으면 `main` 병합만으로는 APK가 생성되지 않습니다.
+
 ## 제한 및 검증 항목
 실제 단말 동작 테스트, 빌드 검증, 초장축 고해상도 이미지 성능 검증은 별도로 필요합니다. 이미지 합치기는 전체 작품이 아닌 현재 회차 단위로 동작합니다.
 
