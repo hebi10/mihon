@@ -25,7 +25,7 @@ internal data class ComicBook(
     val pages: List<ComicPage> = chapters.flatMap { it.pages }
 }
 
-internal enum class ReadingMode { PAGED, WEBTOON }
+internal enum class ReadingMode { PAGED, WEBTOON, DUAL }
 internal enum class PageDirection { LEFT_TO_RIGHT, RIGHT_TO_LEFT }
 internal enum class ScreenOrientation { AUTO, PORTRAIT, LANDSCAPE }
 
@@ -34,6 +34,7 @@ internal enum class ScreenOrientation { AUTO, PORTRAIT, LANDSCAPE }
  */
 internal class ComicRepository(private val context: Context) {
     private val preferences = context.getSharedPreferences("offline_comic_reader", Context.MODE_PRIVATE)
+    private val archiveCache = ArchiveCache(context)
 
     fun roots(): List<Uri> = preferences.getStringSet("selected_folders", emptySet())
         .orEmpty()
@@ -96,22 +97,30 @@ internal class ComicRepository(private val context: Context) {
         val items = folder.listFiles()
         val childFolders = items.filter(DocumentFile::isDirectory)
             .sortedWith { a, b -> compareNatural(a.name.orEmpty(), b.name.orEmpty()) }
-        val directImages = imagePages(items)
+        val archives = items.filter { it.isFile && ArchiveCache.isArchive(it.name.orEmpty()) }
+            .sortedWith { a, b -> compareNatural(a.name.orEmpty(), b.name.orEmpty()) }
 
-        if (directImages.isNotEmpty()) {
+        if (imagePages(items).isNotEmpty()) {
             return listOfNotNull(createBook(folder, sourceUri, items))
         }
 
-        if (childFolders.isEmpty()) return emptyList()
-
-        val chapters = childFolders.all {
-            looksLikeChapter(it.name.orEmpty()) && imagePages(it.listFiles()).isNotEmpty()
+        val chapterFolders = childFolders.isNotEmpty() && childFolders.all {
+            looksLikeChapter(it.name.orEmpty()) &&
+                (imagePages(it.listFiles()).isNotEmpty() ||
+                    it.listFiles().any { item -> ArchiveCache.isArchive(item.name.orEmpty()) })
         }
-        if (chapters) {
+        val chapterArchives = archives.isNotEmpty() && archives.all {
+            looksLikeChapter(it.name.orEmpty().substringBeforeLast('.'))
+        }
+        if ((chapterFolders && archives.isEmpty()) ||
+            (chapterFolders && chapterArchives) ||
+            (childFolders.isEmpty() && archives.size > 1 && chapterArchives)
+        ) {
             return listOfNotNull(createBook(folder, sourceUri, items))
         }
 
-        return childFolders.mapNotNull { createBook(it, sourceUri) }
+        return childFolders.mapNotNull { createBook(it, sourceUri) } +
+            archives.mapNotNull { createArchiveBook(it, sourceUri) }
     }
 
     private fun createBook(
@@ -136,6 +145,15 @@ internal class ComicRepository(private val context: Context) {
                 }
             }
 
+        children.filter { it.isFile && ArchiveCache.isArchive(it.name.orEmpty()) }
+            .sortedWith { a, b -> compareNatural(a.name.orEmpty(), b.name.orEmpty()) }
+            .forEach { archive ->
+                val pages = runCatching { archiveCache.readPages(archive) }.getOrNull().orEmpty()
+                if (pages.isNotEmpty()) {
+                    chapters += ComicChapter(archive.name.orEmpty().substringBeforeLast('.'), pages)
+                }
+            }
+
         if (chapters.isEmpty()) return null
         return ComicBook(
             id = folder.uri.toString(),
@@ -145,17 +163,24 @@ internal class ComicRepository(private val context: Context) {
         )
     }
 
+    private fun createArchiveBook(archive: DocumentFile, sourceUri: Uri): ComicBook? {
+        val pages = runCatching { archiveCache.readPages(archive) }.getOrNull().orEmpty()
+        if (pages.isEmpty()) return null
+        val title = archive.name.orEmpty().substringBeforeLast('.')
+        return ComicBook(
+            id = archive.uri.toString(),
+            title = title,
+            rootUri = sourceUri,
+            chapters = listOf(ComicChapter("본편", pages)),
+        )
+    }
+
     private fun imagePages(files: Array<DocumentFile>): List<ComicPage> =
         files.asSequence()
-            .filter { it.isFile && isSupportedImage(it.name.orEmpty()) }
+            .filter { it.isFile && ArchiveCache.isImageFilename(it.name.orEmpty()) }
             .sortedWith { a, b -> compareNatural(a.name.orEmpty(), b.name.orEmpty()) }
             .map { ComicPage(it.uri, it.name.orEmpty()) }
             .toList()
-
-    private fun isSupportedImage(name: String): Boolean {
-        val extension = name.substringAfterLast('.', "").lowercase()
-        return extension in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic", "heif")
-    }
 
     private fun looksLikeChapter(name: String): Boolean =
         name.matches(Regex("(?i)^(chapter|ch|episode|ep|part|vol|volume|제?\\d+|\\d+).*$"))
