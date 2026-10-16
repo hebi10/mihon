@@ -30,5 +30,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation("androidx.documentfile:documentfile:1.1.0")
 
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
