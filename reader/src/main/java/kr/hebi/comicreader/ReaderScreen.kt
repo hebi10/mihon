@@ -1,6 +1,8 @@
 package kr.hebi.comicreader
 
 import android.graphics.BitmapFactory
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -75,21 +77,57 @@ internal fun ReaderScreen(
     var showControls by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
     var showChapters by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
+    var exportDirection by remember { mutableStateOf(MergeDirection.VERTICAL) }
+    var exportMessage by remember { mutableStateOf<String?>(null) }
+    var exportBusy by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = initialPage) { pages.size }
+    val dualPagerState = rememberPagerState(initialPage = initialPage / 2) { (pages.size + 1) / 2 }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialPage)
+    val currentChapterPages = remember(book.id, currentPage) {
+        var position = 0
+        book.chapters.firstOrNull { chapter ->
+            val contains = currentPage in position until (position + chapter.pages.size)
+            position += chapter.pages.size
+            contains
+        }?.pages ?: pages
+    }
+    val saveImage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { uri ->
+        if (uri != null) {
+            val toExport = currentChapterPages
+            val selectedDirection = exportDirection
+            scope.launch {
+                exportBusy = true
+                exportMessage = ImageMergeExporter(context)
+                    .save(toExport, selectedDirection, uri)
+                    .fold(onSuccess = { it }, onFailure = { it.message ?: "이미지 저장에 실패했습니다." })
+                exportBusy = false
+            }
+        }
+    }
 
     LaunchedEffect(book.id, mode) {
-        if (mode == ReadingMode.PAGED) {
-            pagerState.scrollToPage(currentPage)
-            snapshotFlow { pagerState.currentPage }
-                .distinctUntilChanged()
-                .collect { currentPage = it }
-        } else {
-            listState.scrollToItem(currentPage)
-            snapshotFlow { listState.firstVisibleItemIndex }
-                .distinctUntilChanged()
-                .collect { currentPage = it }
+        when (mode) {
+            ReadingMode.PAGED -> {
+                pagerState.scrollToPage(currentPage)
+                snapshotFlow { pagerState.currentPage }
+                    .distinctUntilChanged()
+                    .collect { currentPage = it }
+            }
+            ReadingMode.DUAL -> {
+                dualPagerState.scrollToPage(currentPage / 2)
+                snapshotFlow { dualPagerState.currentPage }
+                    .distinctUntilChanged()
+                    .collect { currentPage = (it * 2).coerceAtMost(pages.lastIndex) }
+            }
+            ReadingMode.WEBTOON -> {
+                listState.scrollToItem(currentPage)
+                snapshotFlow { listState.firstVisibleItemIndex }
+                    .distinctUntilChanged()
+                    .collect { currentPage = it }
+            }
         }
     }
 
@@ -104,19 +142,31 @@ internal fun ReaderScreen(
         currentPage = currentPage,
         showControls = showControls,
         pagerState = pagerState,
+        dualPagerState = dualPagerState,
         listState = listState,
         onToggleControls = { showControls = !showControls },
         onBack = onBack,
         onOpenChapters = { showChapters = true },
         onOpenSettings = { showSettings = true },
+        onExport = { showExport = true },
         onPrevious = {
             scope.launch {
-                pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0))
+                if (mode == ReadingMode.DUAL) {
+                    dualPagerState.animateScrollToPage((dualPagerState.currentPage - 1).coerceAtLeast(0))
+                } else {
+                    pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0))
+                }
             }
         },
         onNext = {
             scope.launch {
-                pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceAtMost(pages.lastIndex))
+                if (mode == ReadingMode.DUAL) {
+                    dualPagerState.animateScrollToPage(
+                        (dualPagerState.currentPage + 1).coerceAtMost((pages.size - 1) / 2),
+                    )
+                } else {
+                    pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceAtMost(pages.lastIndex))
+                }
             }
         },
     )
@@ -134,6 +184,9 @@ internal fun ReaderScreen(
                         }
                         Option("세로 웹툰", mode == ReadingMode.WEBTOON) {
                             onModeChange(ReadingMode.WEBTOON)
+                        }
+                        Option("두 페이지", mode == ReadingMode.DUAL) {
+                            onModeChange(ReadingMode.DUAL)
                         }
                     }
                     Text("페이지 넘김 방향", style = MaterialTheme.typography.titleSmall)
@@ -163,6 +216,53 @@ internal fun ReaderScreen(
         )
     }
 
+    if (showExport) {
+        AlertDialog(
+            onDismissRequest = { if (!exportBusy) showExport = false },
+            title = { Text("이미지 합치기") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("현재 회차 이미지 ${currentChapterPages.size}장을 하나의 JPEG 파일로 저장합니다.")
+                    Row {
+                        Option("세로 합치기", exportDirection == MergeDirection.VERTICAL) {
+                            exportDirection = MergeDirection.VERTICAL
+                        }
+                        Option("가로 합치기", exportDirection == MergeDirection.HORIZONTAL) {
+                            exportDirection = MergeDirection.HORIZONTAL
+                        }
+                    }
+                    Text(
+                        "초고해상도 또는 긴 회차는 메모리 보호를 위해 저장이 제한될 수 있습니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !exportBusy, onClick = {
+                    showExport = false
+                    saveImage.launch(
+                        book.title.replace(Regex("[\\\\/:*?\"<>|]"), "_") +
+                            if (exportDirection == MergeDirection.VERTICAL) "_세로.jpg" else "_가로.jpg",
+                    )
+                }) { Text("저장 위치 선택") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExport = false }) { Text("취소") }
+            },
+        )
+    }
+
+    if (exportBusy || exportMessage != null) {
+        AlertDialog(
+            onDismissRequest = { if (!exportBusy) exportMessage = null },
+            title = { Text(if (exportBusy) "이미지 합치는 중" else "저장 결과") },
+            text = { Text(if (exportBusy) "이미지를 처리하고 있습니다." else exportMessage.orEmpty()) },
+            confirmButton = {
+                TextButton(enabled = !exportBusy, onClick = { exportMessage = null }) { Text("확인") }
+            },
+        )
+    }
+
     if (showChapters) {
         AlertDialog(
             onDismissRequest = { showChapters = false },
@@ -179,6 +279,7 @@ internal fun ReaderScreen(
                                     scope.launch {
                                         currentPage = index
                                         pagerState.scrollToPage(index)
+                                        dualPagerState.scrollToPage(index / 2)
                                         listState.scrollToItem(index)
                                         showChapters = false
                                     }
@@ -215,11 +316,13 @@ private fun ReaderContent(
     currentPage: Int,
     showControls: Boolean,
     pagerState: androidx.compose.foundation.pager.PagerState,
+    dualPagerState: androidx.compose.foundation.pager.PagerState,
     listState: androidx.compose.foundation.lazy.LazyListState,
     onToggleControls: () -> Unit,
     onBack: () -> Unit,
     onOpenChapters: () -> Unit,
     onOpenSettings: () -> Unit,
+    onExport: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
 ) {
@@ -236,6 +339,33 @@ private fun ReaderContent(
                     isPaged = true,
                     onTap = onToggleControls,
                 )
+            }
+        } else if (mode == ReadingMode.DUAL) {
+            HorizontalPager(
+                state = dualPagerState,
+                reverseLayout = direction == PageDirection.RIGHT_TO_LEFT,
+                modifier = Modifier.fillMaxSize(),
+            ) { spreadIndex ->
+                val first = spreadIndex * 2
+                val pageIndices = if (direction == PageDirection.RIGHT_TO_LEFT) {
+                    listOf(first + 1, first)
+                } else {
+                    listOf(first, first + 1)
+                }
+                Row(modifier = Modifier.fillMaxSize()) {
+                    pageIndices.forEach { index ->
+                        Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+                            if (index < book.pages.size) {
+                                ZoomablePage(
+                                    uri = book.pages[index].uri,
+                                    contentDescription = book.pages[index].filename,
+                                    isPaged = true,
+                                    onTap = onToggleControls,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         } else {
             LazyColumn(
@@ -271,6 +401,7 @@ private fun ReaderContent(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 TextButton(onClick = onOpenChapters) { Text("목차") }
+                TextButton(onClick = onExport) { Text("합치기") }
                 TextButton(onClick = onOpenSettings) { Text("설정") }
             }
 
@@ -281,7 +412,7 @@ private fun ReaderContent(
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (mode == ReadingMode.PAGED) {
+                if (mode != ReadingMode.WEBTOON) {
                     TextButton(onClick = onPrevious) { Text("이전") }
                 }
                 Spacer(Modifier.weight(1f))
@@ -290,7 +421,7 @@ private fun ReaderContent(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.weight(1f))
-                if (mode == ReadingMode.PAGED) {
+                if (mode != ReadingMode.WEBTOON) {
                     TextButton(onClick = onNext) { Text("다음") }
                 }
             }
