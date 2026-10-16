@@ -51,8 +51,11 @@ internal class ComicRepository(private val context: Context) {
         // Removing a bookmark never deletes the user's files.
     }
 
-    fun rootTitle(uri: Uri): String = DocumentFile.fromTreeUri(context, uri)?.name
-        ?: uri.lastPathSegment.orEmpty()
+    fun rootTitle(uri: Uri): String = try {
+        DocumentFile.fromTreeUri(context, uri)?.name ?: uri.lastPathSegment.orEmpty()
+    } catch (_: SecurityException) {
+        uri.lastPathSegment.orEmpty()
+    }
 
     fun progress(book: ComicBook): Int = preferences.getInt("page_${book.id}", 0)
         .coerceIn(0, (book.pages.size - 1).coerceAtLeast(0))
