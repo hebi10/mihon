@@ -65,6 +65,13 @@ internal class ComicRepository(private val context: Context) {
         preferences.edit().putInt("page_${book.id}", pageIndex).apply()
     }
 
+    fun scrollOffset(book: ComicBook): Int =
+        preferences.getInt("scroll_offset_${book.id}", 0).coerceAtLeast(0)
+
+    fun saveScrollOffset(book: ComicBook, offset: Int) {
+        preferences.edit().putInt("scroll_offset_${book.id}", offset.coerceAtLeast(0)).apply()
+    }
+
     fun readMode(): ReadingMode = getEnum("reading_mode", ReadingMode.PAGED)
     fun direction(): PageDirection = getEnum("page_direction", PageDirection.RIGHT_TO_LEFT)
     fun orientation(): ScreenOrientation = getEnum("screen_orientation", ScreenOrientation.AUTO)
