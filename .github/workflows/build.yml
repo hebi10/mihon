@@ -21,6 +21,18 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Reject network and advertising code in the shipped module
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RiE 'okhttp|retrofit|firebase|crashlytics|telemetry|coil-network|play-services-ads' reader/build.gradle.kts; then
+            echo "Network/ads dependency detected"
+            exit 1
+          fi
+          if grep -RiE 'https?://|OkHttpClient|HttpURLConnection|Retrofit|Firebase|AdView|AdvertisingIdClient' reader/src/main/java; then
+            echo "Network/ads call detected"
+            exit 1
+          fi
       - name: Build and run unit tests
         run: ./gradlew :reader:assembleDebug :reader:testDebugUnitTest --stacktrace
       - name: Check the merged Android manifest has no network or advertising permissions
