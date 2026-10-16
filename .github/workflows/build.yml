@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -51,3 +51,22 @@ jobs:
           name: hebi-comic-reader-debug
           path: reader/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+      - name: Publish preview APK to GitHub Releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=reader/build/outputs/apk/debug/reader-debug.apk
+          test -s "$apk"
+          cp "$apk" hebi-comic-reader-v0.2.0-preview.apk
+          if gh release view v0.2.0-preview >/dev/null 2>&1; then
+            gh release upload v0.2.0-preview hebi-comic-reader-v0.2.0-preview.apk --clobber
+          else
+            gh release create v0.2.0-preview hebi-comic-reader-v0.2.0-preview.apk \
+              --target "$GITHUB_SHA" \
+              --title "해비 만화 뷰어 v0.2.0-preview" \
+              --prerelease \
+              --notes "로컬 폴더, 웹툰/가로/두 페이지 보기, ZIP/CBZ, 회차 이미지 합치기, 오프라인 전용. 테스트용 debug 서명 APK이므로 정식 배포 전 별도 서명 구성이 필요합니다."
+          fi
