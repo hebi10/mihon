@@ -1,11 +1,13 @@
 package kr.hebi.comicreader
 
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,11 +42,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 @Composable
@@ -300,6 +305,32 @@ private fun ZoomablePage(
     isPaged: Boolean,
     onTap: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var imageAspectRatio by remember(uri) { mutableFloatStateOf(0.7f) }
+
+    LaunchedEffect(uri, isPaged) {
+        if (!isPaged) {
+            val measuredRatio = withContext(Dispatchers.IO) {
+                try {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    context.contentResolver.openInputStream(uri)?.use {
+                        BitmapFactory.decodeStream(it, null, bounds)
+                    }
+                    if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                        bounds.outWidth.toFloat() / bounds.outHeight
+                    } else {
+                        null
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (measuredRatio != null) {
+                imageAspectRatio = measuredRatio.coerceIn(0.015f, 15f)
+            }
+        }
+    }
+
     var scale by remember(uri) { mutableFloatStateOf(1f) }
     var offset by remember(uri) { mutableStateOf(Offset.Zero) }
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
@@ -308,7 +339,11 @@ private fun ZoomablePage(
         offset = if (nextScale <= 1f) Offset.Zero else offset + panChange
     }
 
-    val container = if (isPaged) Modifier.fillMaxSize() else Modifier.fillMaxWidth()
+    val container = if (isPaged) {
+        Modifier.fillMaxSize()
+    } else {
+        Modifier.fillMaxWidth().aspectRatio(imageAspectRatio)
+    }
     Box(
         modifier = container.clipToBounds()
             .transformable(state = transformState, canPan = { scale > 1f })
@@ -325,21 +360,12 @@ private fun ZoomablePage(
         AsyncImage(
             model = uri,
             contentDescription = contentDescription,
-            modifier = if (isPaged) {
-                Modifier.fillMaxSize().graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offset.x,
-                    translationY = offset.y,
-                )
-            } else {
-                Modifier.fillMaxWidth().graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offset.x,
-                    translationY = offset.y,
-                )
-            },
+            modifier = Modifier.fillMaxSize().graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                translationX = offset.x,
+                translationY = offset.y,
+            ),
             contentScale = if (isPaged) ContentScale.Fit else ContentScale.FillWidth,
         )
     }
