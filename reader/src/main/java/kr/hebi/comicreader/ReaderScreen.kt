@@ -85,7 +85,10 @@ internal fun ReaderScreen(
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = initialPage) { pages.size }
     val dualPagerState = rememberPagerState(initialPage = initialPage / 2) { (pages.size + 1) / 2 }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialPage)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialPage,
+        initialFirstVisibleItemScrollOffset = repository.scrollOffset(book),
+    )
     val currentChapterPages = remember(book.id, currentPage) {
         var position = 0
         book.chapters.firstOrNull { chapter ->
@@ -123,10 +126,13 @@ internal fun ReaderScreen(
                     .collect { currentPage = (it * 2).coerceAtMost(pages.lastIndex) }
             }
             ReadingMode.WEBTOON -> {
-                listState.scrollToItem(currentPage)
-                snapshotFlow { listState.firstVisibleItemIndex }
+                listState.scrollToItem(currentPage, repository.scrollOffset(book))
+                snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
                     .distinctUntilChanged()
-                    .collect { currentPage = it }
+                    .collect { (page, offset) ->
+                        currentPage = page
+                        repository.saveScrollOffset(book, offset)
+                    }
             }
         }
     }
