@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -93,7 +92,7 @@ internal fun ReaderScreen(
         repository.saveProgress(book, currentPage)
     }
 
-    funOpenReaderContent(
+    ReaderContent(
         book = book,
         mode = mode,
         direction = direction,
@@ -204,7 +203,7 @@ private fun Option(label: String, isSelected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun funOpenReaderContent(
+private fun ReaderContent(
     book: ComicBook,
     mode: ReadingMode,
     direction: PageDirection,
